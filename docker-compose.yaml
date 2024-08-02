@@ -1,0 +1,65 @@
+version: '4'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - andean_market_data_net
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    restart: always
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:19092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - andean_market_data_net
+
+  andean_market_data_producer:
+    build:
+      context: ./utilities/producer
+    networks:
+      andean_market_data_net:
+        ipv4_address: 182.20.0.11
+    container_name: andean_market_data_producer
+    hostname: andean_market_data_producer
+    volumes:
+      - ./utilities/producer:/usr/src/andean_market_data_producer
+    tty: true
+
+  andean_market_data_server:
+    build: server
+    networks:
+      andean_market_data_net:
+        ipv4_address: 182.20.0.10    
+    container_name: andean_market_data_server
+    hostname: andean_market_data_server
+    volumes:
+      - ./server:/usr/src/andean_market_data_server
+    tty: true
+
+networks:
+  andean_market_data_net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 182.20.0.0/16
+        gateway: 182.20.0.1
