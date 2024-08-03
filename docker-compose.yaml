@@ -51,6 +51,8 @@ services:
         ipv4_address: 182.20.0.10    
     container_name: andean_market_data_server
     hostname: andean_market_data_server
+    ports:
+      - "3000:3000"
     volumes:
       - ./server:/usr/src/andean_market_data_server
     tty: true
