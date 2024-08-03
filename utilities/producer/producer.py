@@ -22,6 +22,7 @@ def run():
         ts = int(datetime.datetime.now().strftime('%s'))
         for entry in input_data:
             entry["TimeStamp"] = ts + random.randint(1000, 10000000)
+            entry["price"] = random.randint(50, 900)
             output = json.dumps(entry).encode('utf-8')
             producer.send("stock_prices", output)
         if i % 2000 == 0:

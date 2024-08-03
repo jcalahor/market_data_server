@@ -2,6 +2,7 @@
 use axum::{
     routing::get,
     Router,    
+    extract::State,
 };
 use tokio::task;
 use std::{collections::HashMap, net::SocketAddr};
@@ -42,10 +43,8 @@ async fn consume_kafka_messages(
     loop {
         println!("consuming...");
         for msg_result in consumer.iter() {
-                println!("data");
                 let msg = msg_result.unwrap();
                 //let key: &str = msg.key_view().unwrap().unwrap();
-                println!("data");
                 let value = msg.payload().unwrap();
                 let buff = str::from_utf8(&value).unwrap();
                     
@@ -65,36 +64,27 @@ async fn consume_kafka_messages(
         }
 }
 
+type StockPrices = Arc<RwLock<HashMap<String, StockPrice>>>;
 
+async fn get_stock_prices(state: State<StockPrices>) -> Json<Vec<StockPrice>> {
+    let prices: HashMap<String, StockPrice> = state.read().await.clone();
 
-async fn get_stock_prices() -> impl IntoResponse {
-    let stock_prices = vec![
-        StockPrice {
-            symbol: "AAPL".to_string(),
-            price: 180.57,
-            change: 0.11,
-        },
-        StockPrice {
-            symbol: "GOOGL".to_string(),
-            price: 2801.12,
-            change: 0.12
-        },
-        StockPrice {
-            symbol: "MSFT".to_string(),
-            price: 345.67,
-            change: 0.22
-        },
-    ];
-    println!("requested data");
-    Json(stock_prices)
+    let price_list = prices.into_iter().map(|(symbol, inner_map)| {
+        // Assume 'price' is always present in the inner_map
+        let price = inner_map.price;
+        let change =inner_map.change;
+        StockPrice { symbol, price, change }
+    }).collect();
+
+    Json(price_list)
+    
 }
 
-type StockPrices = Arc<RwLock<HashMap<String, StockPrice>>>;
 
 #[tokio::main]
 async fn main() {
     let stock_prices: StockPrices = Arc::new(RwLock::new(HashMap::new()));
-    let (tx, mut rx) = mpsc::channel(100);
+    let (tx, mut rx) = mpsc::channel(1000);
 
     let kafka_brokers = "kafka:9092";
     let kafka_topic = "stock_prices";
@@ -105,10 +95,15 @@ async fn main() {
 
     let stock_prices_clone: Arc<RwLock<HashMap<String, StockPrice>>> = stock_prices.clone();
     tokio::spawn(async move {
-        while let Some(price) = rx.recv().await {
-            //let mut prices = stock_prices_clone.write().await;
-            //prices.push(price);
-            println!("Received and ready to process{:?}", price)
+        while let Some(stock_price) = rx.recv().await {
+            let mut stock_prices = stock_prices_clone.write().await;
+            println! ("updated");
+            stock_prices.insert(stock_price.symbol.clone(), StockPrice {
+                symbol: stock_price.symbol.clone(),
+                price: stock_price.price,
+                change: stock_price.change
+            });
+            println!("{:?}", stock_prices);
        }
     });
 
@@ -117,7 +112,8 @@ async fn main() {
       .allow_methods(Any) // Allow any method
       .allow_headers(Any); // Allow any header
 
-    let app = Router::new().route("/stock-prices", get(get_stock_prices))
+    let app = Router::new().route("/stock-prices", get(get_stock_prices))       
+       .with_state(stock_prices.clone())
        .layer(cors);
 
      let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
