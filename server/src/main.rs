@@ -3,8 +3,8 @@ use axum::{
     routing::get,
     Router,    
     extract::State,
+    extract::ws::{WebSocket, WebSocketUpgrade},
 };
-use tokio::task;
 use std::{collections::HashMap, net::SocketAddr};
 mod stock_price;
 use stock_price::StockPrice;
@@ -13,10 +13,11 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+
 use tower_http::cors::{CorsLayer, Any};
 use rdkafka::{
-    consumer::{BaseConsumer, Consumer, StreamConsumer},
-    ClientConfig, ClientContext, Message,
+    consumer::{BaseConsumer, Consumer},
+    ClientConfig, Message
 };
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
@@ -66,6 +67,26 @@ async fn consume_kafka_messages(
 
 type StockPrices = Arc<RwLock<HashMap<String, StockPrice>>>;
 
+async fn handler(ws: WebSocketUpgrade, state: State<StockPrices>) -> impl IntoResponse  {
+    ws.on_upgrade(|socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: State<StockPrices>) {
+    while let Some(msg) = socket.recv().await {
+        let msg = if let Ok(msg) = msg {
+            msg
+        } else {
+            // client disconnected
+            return;
+        };
+
+        if socket.send(msg).await.is_err() {
+            // client disconnected
+            return;
+        }
+    }
+}
+
 async fn get_stock_prices(state: State<StockPrices>) -> Json<Vec<StockPrice>> {
     let prices: HashMap<String, StockPrice> = state.read().await.clone();
 
@@ -112,14 +133,14 @@ async fn main() {
       .allow_methods(Any) // Allow any method
       .allow_headers(Any); // Allow any header
 
-    let app = Router::new().route("/stock-prices", get(get_stock_prices))       
+    let app = Router::new().route("/stock-prices", get(get_stock_prices))
+       .route("/ws", get(handler))
        .with_state(stock_prices.clone())
        .layer(cors);
 
      let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("Listening on {}", addr);
-     axum::Server::bind(&addr)
-       .serve(app.into_make_service())
-        .await
-       .unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
